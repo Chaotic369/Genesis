@@ -97,7 +97,7 @@ canvas#c.drag{cursor:grabbing}
   <h3>Graphics</h3>
   <div class="row">
     <button data-q="low">Low</button><button data-q="medium">Medium</button>
-    <button data-q="high">High</button><button data-q="extreme">Extreme</button>
+    <button data-q="high">High</button><button data-q="extreme">Extreme</button><button data-q="ultra" style="grid-column:span 2">Ultra</button>
   </div>
   <p id="gdesc"></p>
   <div id="fps"></div>
@@ -121,7 +121,8 @@ const QUALITY={
  low:    {name:'Low',    scale:.55,dpr:1,   steps:130,vol:0,bloom:0,web:40000, mw:90000,  dust:3000,  gal:140,fb:3,aa:0,desc:'Lightweight. Reduced resolution, no bloom, fewer stars. For integrated GPUs and phones.'},
  medium: {name:'Medium', scale:.8, dpr:1.25,steps:210,vol:0,bloom:3,web:130000,mw:260000, dust:9000,  gal:260,fb:4,aa:0,desc:'Balanced. Bloom, volumetric glow and a rich star count.'},
  high:   {name:'High',   scale:1,  dpr:1.5, steps:320,vol:1,bloom:5,web:320000,mw:600000, dust:20000, gal:420,fb:5,aa:0,desc:'Cinematic. Full resolution, volumetric accretion gas, deep bloom.'},
- extreme:{name:'Extreme',scale:1,  dpr:2,   steps:520,vol:1,bloom:6,web:700000,mw:1400000,dust:40000, gal:700,fb:6,aa:1,desc:'Maximum. Native-density rendering, 2-sample ray supersampling, 1.4M star galaxy. Needs a strong GPU.'}
+ extreme:{name:'Extreme',scale:1,  dpr:2,   steps:520,vol:1,bloom:6,web:700000,mw:1400000,dust:40000, gal:700,fb:6,aa:1,desc:'Maximum. Native-density rendering, 2-sample ray supersampling, 1.4M star galaxy. Needs a strong GPU.'},
+ ultra:  {name:'Ultra',  scale:1.25,dpr:2,   steps:640,vol:1,bloom:7,web:1200000,mw:2600000,dust:80000, gal:1100,fb:8,aa:2,desc:'Beyond Extreme. 1.25x supersampled frame, 3-ray anti-aliasing, deep volumetric disk slicing, 2.6M-star galaxy. Needs a top-end GPU.'}
 };
 let qKey='high';
 try{const s=localStorage.getItem('genesis.q');if(s&&QUALITY[s])qKey=s;else if(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent))qKey='medium';}catch(e){}
@@ -356,6 +357,7 @@ void main(){
   vec2 fc=gl_FragCoord.xy;
   vec3 c=trace(fc);
   if(u_aa==1)c=.5*(c+trace(fc+vec2(.5,.25)));
+  if(u_aa==2)c=(c+trace(fc+vec2(.5,.25))+trace(fc+vec2(-.25,.5)))/3.;
   o=vec4(c*u_expo,1.);
 }
 `;
@@ -810,10 +812,14 @@ void main(){
   if(u_warp>.002){
     c=vec3(0.);
     for(int i=0;i<10;i++){
-      vec2 wu=.5+cc*(1.-u_warp*float(i)/9.);
+      float ak=float(i)/9.,aw=u_warp*(2.4*ak+3.6*exp(-length(cc)*4.))*(1.-.5*ak);
+      vec2 wu=.5+mat2(cos(aw),-sin(aw),sin(aw),cos(aw))*cc*(1.-min(u_warp,1.)*.9*ak);
       c+=vec3(texture(u_hdr,wu+off).r,texture(u_hdr,wu).g,texture(u_hdr,wu-off).b);
     }
     c*=.1;
+    float wr=length(cc),wsp=.5+.5*sin(atan(cc.y,cc.x+1e-5)*6.+log(wr+.03)*11.-u_time*(4.+8.*u_warp));
+    c*=1.-.5*min(u_warp,1.)*smoothstep(.15,.7,wr);
+    c+=mix(vec3(.25,.5,1.),vec3(.85,.55,1.),wsp)*u_warp*(.4*wsp*wsp*wsp*smoothstep(0.,.7,wr)+1.5*exp(-wr*wr*(14.-8.*min(u_warp,1.))));
   }
   c+=texture(u_bloom,uv).rgb*u_bloomAmt;
   c*=u_expo;
@@ -882,7 +888,8 @@ vec3 diskEm(vec2 F){
   float rip=.5+.5*cos(7.*phi+4.*fl);
   float rg=smoothstep(2.5,5.5,r)*(1.-smoothstep(12.,17.,r));
   rip=1.-rg*.55*(1.-rip);
-  float lum=prof*(.62+.62*m*(.55+.9*cl))*(.72+.56*fl)*(.85+.3*fn)*(.55+.45*rip);
+  float fg=.6*vnoise(vec3(Fb*13.,6.1))+.4*vnoise(vec3(Fb*29.,2.7));
+  float lum=prof*(.62+.62*m*(.55+.9*cl))*(.72+.56*fl)*(.85+.3*fn)*(.55+.45*rip)*(.76+.5*fg);
   vec3 st=mix(vec3(1.,.78,.58),vec3(.62,.72,1.),smoothstep(4.,13.,r));
   st=mix(st,vec3(.68,.78,1.),clamp(m,0.,1.)*.35*smoothstep(5.,10.,r));
   /* reddish-brown dust lanes */
@@ -925,9 +932,11 @@ void main(){
   bool hit0=F0.x<5e2;
   /* thin disk: a few slices through the plane so it keeps some depth when orbited */
   vec3 dsum=vec3(0.);float wsum=0.;
-  for(int i=0;i<5;i++){
-    if(i>=u_ns)break;
-    float yi=(float(i)-float(u_ns-1)*.5)*.55;
+  float jt=hash21(gl_FragCoord.xy)-.5;
+  int nsl=min(9,u_ns+int(float(u_ns)*(1.-abs(dg.z))));
+  for(int i=0;i<9;i++){
+    if(i>=nsl)break;
+    float yi=(float(i)+jt*.9-float(nsl-1)*.5)*(.55*float(u_ns)/float(nsl)+.1*(1.-abs(dg.z)));
     float w=exp(-abs(yi)/.5);
     wsum+=w;
     if(abs(dg.z)<1e-4)continue;
@@ -971,7 +980,8 @@ void main(){
     vec3 pcn=og-dg*dot(og,dg);
     float hn=fbm3(pcn*.28+vec3(0.,0.,u_time*.03),4);
     float hz=gline(og,dg,vec3(hr,hr*.8,hr),1.,0.);
-    halo=mix(vec3(.30,.34,.85),vec3(1.,.55,.35),smoothstep(.45,.9,hn))*hz*.0022*(.35+1.5*hn*hn)*hA;
+    float hrg=1.-abs(2.*fbm3(pcn*.42+vec3(4.,0.,u_time*.05),4)-1.);
+    halo=mix(vec3(.30,.34,.85),vec3(1.,.55,.35),smoothstep(.45,.9,hn))*hz*.0022*(.35+1.5*hn*hn+3.*pow(hrg,6.))*hA;
   }
   /* the Sun: a pulsing marker on the Orion Spur, 8.2 kpc from the center */
   vec3 sunm=vec3(0.);
@@ -1061,7 +1071,7 @@ function drawGX(cam,o){
   u2f(p,'u_res',hdr.w,hdr.h);u1f(p,'u_time',o.time);
   u3v(p,'u_cam',cam.eye);u3v(p,'u_right',cam.right);u3v(p,'u_up',cam.up);u3v(p,'u_fwd',cam.fwd);
   u1f(p,'u_th',cam.th);u1f(p,'u_rot',o.rot);u1f(p,'u_g',o.g);u1f(p,'u_gx',o.gx);u1f(p,'u_bright',o.abright);
-  u1i(p,'u_ns',Q.aa?5:(Q.vol?3:1));
+  u1i(p,'u_ns',Q.aa>1?7:(Q.aa?5:(Q.vol?3:1)));
   fsq();
 }
 function drawMW(cam,o){
@@ -1104,7 +1114,7 @@ function present(o){
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,hdr.tex);gl.uniform1i(p.U.u_hdr,0);
   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,hasB?bloomRT[0].tex:hdr.tex);gl.uniform1i(p.U.u_bloom,1);
   u1f(p,'u_bloomAmt',hasB?o.bloom:0);u1f(p,'u_expo',o.expo);u1f(p,'u_time',o.time);u1f(p,'u_black',o.black?1:0);
-  u1f(p,'u_ca',Q.bloom?.016:.008);u1f(p,'u_grain',.028);u1f(p,'u_flash',o.flash||0);u1f(p,'u_warp',o.warp||0);u2f(p,'u_res',cw,ch);
+  u1f(p,'u_ca',Q.bloom?.011:.006);u1f(p,'u_grain',.028);u1f(p,'u_flash',o.flash||0);u1f(p,'u_warp',Math.max(o.warp||0,.9*WORM*WORM));u2f(p,'u_res',cw,ch);
   fsq();
   gl.activeTexture(gl.TEXTURE0);
 }
@@ -1301,7 +1311,7 @@ function togglePause(){
   auSync(seqT);
 }
 function seekTo(t){
-  seqT=M.clamp(t,0,TB+END_B);
+  WORM=1;seqT=M.clamp(t,0,TB+END_B);
   orb.sy=0;orb.sp=0;orb.sz=1;
   if(seqT>=TB+END_B){goFinal();return;}
   if(mode!=='seq'){
@@ -1325,7 +1335,7 @@ function startSeq(at){
   orb.dist=24;orb.pitch=.14;orb.vy=0;orb.vp=0;orb.vd=0;orb.sy=0;orb.sp=0;orb.sz=1;
 }
 function goFinal(){
-  mode='final';FREEZE=false;el.pause.textContent='Pause';
+  mode='final';WORM=1.2;FREEZE=false;el.pause.textContent='Pause';
   el.home.classList.add('hide');el.pause.classList.add('hide');el.skip.classList.add('hide');el.replay.classList.remove('hide');
   el.tl.classList.remove('hide');el.tlFill.style.width='100%';
   el.clock.classList.remove('hide');el.clockv.textContent='Today · 13.8 billion years';
@@ -1468,7 +1478,7 @@ function renderScene(){
   const t=seqT;
   if(t<1.2){                                   // the home black hole is pulled in and swallowed
     const k=ez(t/1.2);
-    drawBH(makeCam(bhEye(orb.yaw+k*.9,orb.pitch,orb.dist*(1-.5*k)),[0,0,0],BH_FOV),{time,m:1,gal:0,expo:1-k,disk:1});
+    drawBH(makeCam(bhEye(orb.yaw+k*.9,orb.pitch,orb.dist*(1-.5*k)),[0,0,0],BH_FOV),{time,m:1,gal:0,expo:1-k,disk:1});o.warp=.8*k*k;
     return o;
   }
   if(t<TB){o.black=true;return o;}             // 5.0 s of absolute darkness
@@ -1483,7 +1493,7 @@ function renderScene(){
       core:b<3.5?1.8*Math.exp(-b*.8):0,shock:Math.exp(-b/1.5)});
     o.expo=.8;
     o.flash=b<.7?Math.pow(1-b/.7,2)*1.3:0;
-    o.warp=.55*Math.exp(-b*2.2);
+    o.warp=.95*Math.exp(-b*2.2);
   }
   if(b>=20&&b<67.5){                           // ---- dark ages, cosmic web, galaxies ----
     const D=.05+2.0*M.clamp((b-20)/48,0,1);
@@ -1497,7 +1507,7 @@ function renderScene(){
     const cam=makeCam(_eye,_tg,M.clamp((55+7*Math.sin(.17*b)-10*sst(50,66,b))*orb.sz,28,85));
     drawWeb(cam,{D,box:90,bright:sst(21,28,b)*fade,time,stars:sst(28,40,b)*.9*fade});
     if(b>=34)drawGal(cam,{D,box:90,gsize:1.6*(1+.4*sst(38,66,b)),vis:sst(34,66,b),bright:.9*fade});
-    o.warp=.32*sst(56,64,b)*(1-sst(64,67,b));
+    o.warp=.75*sst(56,64,b)*(1-sst(64,67,b));
     o.expo=1.0;
   }
   if(b>=67){                                   // ---- Milky Way assembles, then the central black hole forms ----
@@ -1514,7 +1524,7 @@ function renderScene(){
     const cam=makeCam(ey,[kc[4],kc[5],kc[6]],kc[3],.03,300);
     drawMW(cam,{g,rot,gx:sst(.22,.85,g),abright:fin*(1-bhk),bright:fin*(1-bhk)*1.18,time});
     const pl=M.clamp((b-153)/18,0,1),ps=Math.sin(Math.PI*pl);
-    o.warp=Math.max(.4*(1-sst(67,74,b)),.5*ps*ps);
+    o.warp=Math.max(.8*(1-sst(67,74,b)),.95*ps*ps);
     o.expo=1.0;o.bloom=lerp(.18,.1,bhk);
   }
   return o;
@@ -1528,11 +1538,11 @@ function updateHUD(){
   let idx=0;for(let i=0;i<CH.length;i++)if(b>=CH[i][0]+.2)idx=i;
   setCaption(idx,CH[idx][1],CH[idx][2]);
 }
-let FREEZE=false;
+let FREEZE=false,WORM=0;
 let fpsAcc=0,fpsN=0,fpsShow=0,fpsLowFor=0;
 function frame(now){
   requestAnimationFrame(frame);
-  const rawDt=(now-last)/1000,dt=Math.min(.25,rawDt);last=now;time+=dt;
+  const rawDt=(now-last)/1000,dt=Math.min(.25,rawDt);last=now;time+=dt;WORM=Math.max(0,WORM-dt*1.1);
   const damp=Math.exp(-dt*7);
   if(mode==='seq'){
     if(!FREEZE)seqT+=dt;
@@ -1552,7 +1562,7 @@ function frame(now){
   if(fpsAcc>.5){
     fpsShow=fpsN/fpsAcc;fpsAcc=0;fpsN=0;
     el.fps.textContent=fpsShow.toFixed(0)+' FPS · '+hdr.w+'×'+hdr.h;
-    if(fpsShow<20&&(qKey==='high'||qKey==='extreme')){fpsLowFor+=.5;if(fpsLowFor>6)el.gdesc.textContent='Low frame rate detected — try a lower preset for smoother playback.';}
+    if(fpsShow<20&&(qKey==='high'||qKey==='extreme'||qKey==='ultra')){fpsLowFor+=.5;if(fpsLowFor>6)el.gdesc.textContent='Low frame rate detected — try a lower preset for smoother playback.';}
     else fpsLowFor=Math.max(0,fpsLowFor-.5);
   }
 }
