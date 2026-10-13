@@ -30,7 +30,10 @@ canvas#c.drag{cursor:grabbing}
  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 0 38px rgba(255,150,60,.18);transition:.35s}
 #bang:hover{background:rgba(255,150,60,.16);border-color:#ffb067;box-shadow:0 0 60px rgba(255,150,60,.4);letter-spacing:.52em}
 #hint{margin-top:16px;font-size:10px;letter-spacing:.28em;color:var(--dim);text-transform:uppercase}
-#bar{right:30px;bottom:30px;display:flex;gap:10px;align-items:center}
+#bar{right:76px;bottom:30px;display:flex;gap:10px;align-items:center;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .4s ease,transform .4s ease}
+#bar.open{opacity:1;pointer-events:auto;transform:none}
+#peek{position:fixed;right:30px;bottom:30px;z-index:11;width:34px;height:34px;border-radius:50%;cursor:pointer;pointer-events:auto;background:rgba(10,12,18,.35);border:1px solid var(--line);color:var(--dim);font:400 14px/32px "Helvetica Neue",Arial,sans-serif;text-align:center;opacity:.45;transition:opacity .3s,border-color .3s}
+#peek:hover,#peek.on{opacity:1;border-color:var(--hot)}
 .pill{pointer-events:auto;cursor:pointer;background:rgba(10,12,18,.5);border:1px solid var(--line);color:var(--ink);
  padding:9px 15px;font:400 10px "Helvetica Neue",Arial,sans-serif;letter-spacing:.24em;text-transform:uppercase;border-radius:30px;
  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:.25s}
@@ -50,7 +53,7 @@ canvas#c.drag{cursor:grabbing}
 #err{position:fixed;inset:0;z-index:99;display:none;align-items:center;justify-content:center;padding:40px;background:#000;
  color:#ffb4a0;font:13px/1.6 monospace;white-space:pre-wrap}
 @media(max-width:700px){#brand{top:16px;left:16px}#clock{top:16px;right:16px}#caption{left:16px;bottom:78px}
- #bar{right:12px;bottom:16px;gap:6px}.pill{padding:8px 10px;font-size:9px}#gfx{right:12px;bottom:62px}}
+ #bar{right:56px;bottom:16px;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 70px)}#peek{right:12px;bottom:16px}.pill{padding:8px 10px;font-size:9px}#gfx{right:12px;bottom:62px}}
 </style>
 </head>
 <body>
@@ -72,6 +75,8 @@ canvas#c.drag{cursor:grabbing}
   <button class="pill" id="snd">Sound on</button>
   <button class="pill" id="gbtn">Graphics: High</button>
 </div>
+
+<button id="peek" aria-label="Show controls">⋯</button>
 
 <div id="gfx" class="closed">
   <h3>Graphics</h3>
@@ -235,13 +240,13 @@ vec3 sky(vec3 d,float pixA){
   vec3 mw=vec3(.50,.58,.85)*dn*.075+vec3(1.,.70,.40)*bulge*(.25+band)*.11*mix(1.,2.5,G);
   mw+=vec3(.9,.45,.5)*pow(cl2,3.)*band*.03*(1.+G*2.);
   mw*=(1.-dust);
-  mw*=mix(1.,1.2,G);
+  mw*=mix(1.,.55,G);
   float dm=1.+2.5*band*(1.-dust*.8)+G*2.;
   vec3 st=starLayer(d,40.,.05,pixA,1.,1.)
          +starLayer(d,85.,.05*dm,pixA,2.,.7)
          +starLayer(d,180.,.06*dm,pixA,3.,.5)
          +starLayer(d,380.,.07*dm,pixA,4.,.4);
-  st*=mix(1.,.55,dust*.8)*mix(1.,.75,G);
+  st*=mix(1.,.55,dust*.8)*mix(1.,.6,G);
   return mw+st+vec3(.002,.0025,.005)*(.5+cl);
 }
 
@@ -255,7 +260,7 @@ vec3 diskEmit(vec3 hp,vec3 v,bool detail,out float dens){
   float gg=sqrt(max(1.-1./rd,.02));
   float g=gd*gg;
   float f=pow(rd/3.,-.75)*pow(max(1.-sqrt(3./rd),.07),.25)/.49;
-  float Tobs=6100.*f*g;
+  float Tobs=6100.*f*pow(g,.55);
   float a=atan(hp.z,hp.x);
   float w=2.6/(rd*sqrt(rd));
   float aa=a-w*u_time;
@@ -265,7 +270,7 @@ vec3 diskEmit(vec3 hp,vec3 v,bool detail,out float dens){
   float edge=smoothstep(RIN,RIN+.45,rd)*(1.-smoothstep(ROUT-5.,ROUT,rd));
   float fall=exp(-(rd-RIN)*.1);
   dens=clamp(edge*fall*(.2+1.35*n1)*(.55+.9*n2)*1.15,0.,1.)*u_disk;
-  float I=pow(clamp(Tobs/5200.,0.,2.4),2.7);
+  float I=pow(clamp(Tobs/5200.,0.,1.7),2.4)*clamp(pow(g,1.4),.25,1.8);
   return blackbody(Tobs)*I;
 }
 
@@ -494,7 +499,7 @@ void main(){
     vec3 cArm=mix(vec3(.42,.56,1.),vec3(.78,.82,1.),cloud);
     col=cArm*disk*(.15+1.5*armT*(.45+cloud))+vec3(1.,.78,.5)*(bulge+core)*.9+vec3(.9,.88,.9)*disk*.12;
     float kn=pow(vnoise(vec3(P*30.,vSeed*9.)),5.)*armT*disk*30.;
-    col+=vec3(1.,.38,.55)*kn*.5;
+    col+=vec3(1.,.66,.52)*kn*.18;
     col*=1.-.7*lanes;
   }else if(vType<1.5){
     float rp=pow(max(r,.012)/.3,.25);
@@ -503,7 +508,7 @@ void main(){
   }else{
     float n=fbm3(vec3(P*5.,vSeed*30.),4);
     float v=smoothstep(.42,.78,n)*exp(-r*1.8);
-    col=mix(vec3(.5,.65,1.),vec3(1.,.5,.7),vnoise(vec3(P*14.,vSeed*5.)))*v*.55;
+    col=mix(vec3(.5,.65,1.),vec3(.9,.8,.72),vnoise(vec3(P*14.,vSeed*5.)))*v*.55;
   }
   col*=smoothstep(1.,.72,rr);
   o=vec4(col*vA,1.);
@@ -550,8 +555,8 @@ void main(){
     float y=((rnd(id,9u)>.5)?1.:-1.)*(-log(max(1.-rnd(id,8u),1e-4)))*.17*(1.+r*.03);
     fin=vec3(r*cos(th),y,r*sin(th));
     bool young=inArm&&rnd(id,10u)<.42;
-    T=young?mix(8500.,19000.,rnd(id,11u)):mix(4300.,6900.,rnd(id,11u));
-    br=young?1.5:.75;
+    T=young?mix(7500.,11500.,rnd(id,11u)):mix(4800.,7200.,rnd(id,11u));
+    br=young?1.1:.75;
   }else if(t<.90){
     float rh=2.+24.*pow(rnd(id,2u),.6);
     fin=rdir(id,3u)*rh*vec3(1.,.8,1.);
@@ -609,18 +614,18 @@ out vec3 vCol;out float vA;
 void main(){
   uint id=uint(gl_VertexID);
   float r=-3.0*(log(max(rnd(id,2u),1e-4))+log(max(rnd(id,3u),1e-4)));if(r>18.)r=mod(r,18.);
-  r=max(r,1.2);
+  r=max(r,2.6);
   float arm=pickArm(rnd(id,6u));
   float th,y,szw,alpha;vec3 col;
   if(u_mode==0){
     th=armTheta(r,arm)+.3+gauss(id,7u)*.16;
-    y=gauss(id,9u)*.10;szw=.8+1.6*rnd(id,12u);alpha=.075;col=vec3(0.);
+    y=gauss(id,9u)*.10;szw=.8+1.6*rnd(id,12u);alpha=.1;col=vec3(0.);
   }else{
     r=max(r*1.15,2.5);
     th=armTheta(r,arm)+gauss(id,7u)*.1;
-    y=gauss(id,9u)*.08;szw=.3+.6*rnd(id,12u);alpha=.014;
+    y=gauss(id,9u)*.08;szw=.3+.6*rnd(id,12u);alpha=.005;
     float k=rnd(id,13u);
-    col=k<.7?vec3(1.,.36,.46):vec3(.45,.6,1.);
+    col=k<.7?vec3(.95,.82,.62):vec3(.55,.66,1.);
   }
   vec3 fin=vec3(r*cos(th),y,r*sin(th));
   float delay=.25+rnd(id,40u)*.4;
@@ -685,9 +690,9 @@ void main(){
   c*=u_expo;
   c+=u_flash*vec3(1.,.95,.88);
   c*=1.-.55*smoothstep(.1,.62,rr);
-  c=aces(c*.95);
+  c=aces(c*.88);
   float l=dot(c,vec3(.299,.587,.114));
-  c=mix(vec3(l),c,1.12);
+  c=mix(vec3(l),c,1.05);
   c=pow(c,vec3(1./2.2));
   float n=fract(sin(dot(uv*u_res+fract(u_time)*113.,vec2(12.9898,78.233)))*43758.5453)-.5;
   c+=n*u_grain*(1.-.6*l);
@@ -768,7 +773,7 @@ function drawMW(cam,o){
   gl.bindVertexArray(emptyVAO);
   let p=P.mw;gl.useProgram(p.p);additive();
   um4(p,'u_vp',cam.vp);u3v(p,'u_cam',cam.eye);
-  u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(6e5/Q.mw)*.17);u1f(p,'u_time',o.time);
+  u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(6e5/Q.mw)*.15);u1f(p,'u_time',o.time);
   gl.drawArrays(gl.POINTS,0,Q.mw);
   p=P.dust;gl.useProgram(p.p);
   um4(p,'u_vp',cam.vp);u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright);
@@ -873,7 +878,17 @@ function setQuality(k){
   el.gfx.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.q===k));
   resize();fpsLowFor=0;
 }
-el.gbtn.onclick=()=>el.gfx.classList.toggle('closed');
+const peekBtn=$('peek');let barTimer=0;
+function pokeBar(){el.bar.classList.add('open');peekBtn.classList.add('on');clearTimeout(barTimer);barTimer=setTimeout(closeBar,6000);}
+function closeBar(){
+  if(!el.gfx.classList.contains('closed')){barTimer=setTimeout(closeBar,3000);return;}
+  el.bar.classList.remove('open');peekBtn.classList.remove('on');
+}
+peekBtn.onclick=pokeBar;
+peekBtn.onmouseenter=pokeBar;
+el.bar.onmousemove=pokeBar;
+el.bar.addEventListener('pointerdown',pokeBar);
+el.gbtn.onclick=()=>{el.gfx.classList.toggle('closed');pokeBar();};
 el.gfx.querySelectorAll('button').forEach(b=>b.onclick=()=>setQuality(b.dataset.q));
 
 /* ---------- audio (Web Audio synthesis) ---------- */
@@ -927,6 +942,11 @@ function auSequence(){
   AU.pad.gain.linearRampToValueAtTime(.12,tb+130);AU.shimmer.gain.linearRampToValueAtTime(.015,tb+138);
   AU.drone.gain.setValueAtTime(0,tb+120);AU.drone.gain.linearRampToValueAtTime(.95,tb+140);
 }
+function auRestart(){
+  try{if(AU.ctx){const cp=AU.ctx.close();if(cp&&cp.catch)cp.catch(()=>{});}}catch(e){}
+  AU.ctx=null;AU.master=null;AU.drone=null;AU.pad=null;AU.shimmer=null;AU.padF=null;
+  auInit();
+}
 function auHome(){
   if(!AU.ctx)return;const c=AU.ctx,t=c.currentTime;
   [AU.pad,AU.shimmer].forEach(g=>{g.gain.cancelScheduledValues(t);g.gain.setTargetAtTime(0,t,.8);});
@@ -943,7 +963,7 @@ function startSeq(at){
   mode='seq';seqT=at||0;capIdx=-2;
   el.home.classList.add('hide');
   el.clock.classList.remove('hide');el.cap.classList.remove('hide');
-  el.skip.classList.remove('hide');el.replay.classList.add('hide');
+  el.skip.classList.remove('hide');el.replay.classList.remove('hide');
   el.sub.textContent='Genesis';
   orb.dist=24;orb.pitch=.14;
 }
@@ -962,7 +982,7 @@ function goHome(){
   orb.dist=24;orb.pitch=.14;auHome();
 }
 $('bang').onclick=()=>{if(mode==='home')startSeq(0);};
-el.replay.onclick=goHome;
+el.replay.onclick=()=>{if(mode==='home')return;auRestart();startSeq(0);};
 el.skip.onclick=()=>{
   if(mode!=='seq')return;
   const b=seqT-TB;
@@ -999,7 +1019,7 @@ function renderScene(){
   const o={expo:1,black:false,flash:0,bloom:.38};
   if(mode==='home'||mode==='final'){
     drawBH(makeCam(bhEye(orb.yaw,orb.pitch,orb.dist),[0,0,0],BH_FOV),{time,m:1,gal:mode==='final'?1:0,expo:1,disk:1});
-    o.bloom=.2;return o;
+    o.bloom=.1;return o;
   }
   const t=seqT;
   if(t<1.2){                                   // the home black hole is pulled in and swallowed
@@ -1042,7 +1062,7 @@ function renderScene(){
     }
     const cam=makeCam(bhEye(yaw,pitch,dist),[0,0,0],50,.03,300);
     drawMW(cam,{g,rot:.05*(b-70),bright:fin*(1-bhk),time});
-    o.expo=1.0;o.bloom=lerp(.3,.2,bhk);
+    o.expo=1.0;o.bloom=lerp(.22,.1,bhk);
   }
   return o;
 }
