@@ -905,8 +905,8 @@ void main(){
   }
   core*=smoothstep(.05,.5,u_g);
   /* faint navy sky and the soft blue halo around the disk */
-  vec3 amb=vec3(.0045,.0085,.0155);
-  if(hit0)amb+=vec3(.012,.016,.034)*exp(-dot(F0,F0)/288.);
+  vec3 amb=vec3(.0010,.0019,.0036);
+  if(hit0)amb+=vec3(.0055,.0075,.016)*exp(-dot(F0,F0)/200.);
   /* small satellite dwarf galaxy to the upper left */
   vec3 sat=vec3(0.);
   if(hit0&&u_g>.6){
@@ -1005,7 +1005,7 @@ function drawMW(cam,o){
   u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(1-.68*(o.gx||0))*(6e5/Q.mw)*.15);u1f(p,'u_time',o.time);
   gl.drawArrays(gl.POINTS,0,Q.mw);
   p=P.dust;gl.useProgram(p.p);
-  um4(p,'u_vp',cam.vp);u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(1-.55*(o.gx||0)));
+  um4(p,'u_vp',cam.vp);u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(1-.55*(o.gx||0))*(9000/Q.dust));
   gl.enable(gl.BLEND);gl.blendFunc(gl.ZERO,gl.ONE_MINUS_SRC_ALPHA);
   u1i(p,'u_mode',0);gl.drawArrays(gl.POINTS,0,Q.dust);
   additive();
