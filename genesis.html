@@ -651,6 +651,7 @@ void main(){
     fin=vec3(r*cos(th),y,r*sin(th));
     T=mix(4400.,6800.,rnd(id,6u));br=.52;
   }
+  fin.z=-fin.z;
   float rxz=length(fin.xz);
   vec3 start=protoPos(id,fin,rxz);
   /* Inside-out assembly: core collapses first, outer spiral disk settles after */
@@ -710,7 +711,7 @@ void main(){
     if(r<4.2)col=vec3(1.,.78,.48);
     else col=k<.52?vec3(.45,.64,1.):(k<.82?vec3(.96,.78,.56):vec3(.98,.32,.54));
   }
-  vec3 fin=vec3(r*cos(th),y,r*sin(th));
+  vec3 fin=vec3(r*cos(th),y,-r*sin(th));
   float delay=.18+clamp(r/22.,0.,1.)*.25+rnd(id,40u)*.25;
   float gp=clamp((u_g-delay)/.5,0.,1.);
   float e=gp*gp*(3.-2.*gp);
@@ -782,6 +783,141 @@ void main(){
   o=vec4(c,1.);
 }
 `;
+const GX_FS=`
+precision highp float;precision highp int;
+in vec2 vUV;
+uniform vec2 u_res;uniform float u_time,u_th,u_rot,u_g,u_gx,u_bright;
+uniform vec3 u_cam,u_right,u_up,u_fwd;
+uniform int u_ns;
+out vec4 o;
+`+GLSL_COMMON+`
+#define GPI 3.14159265
+#define GRBAR 3.8
+#define GBAR 0.42
+float wrapA(float a){return a-6.2831853*floor((a+GPI)/6.2831853);}
+float gArm(float r,float k){
+  bool mj=(k<.5||(k>1.5&&k<2.5));
+  float r0=mj?GRBAR:GRBAR*1.45;
+  float w=log(max(r,r0)/r0)*(mj?4.4:4.75);
+  return GBAR+k*GPI*.5+w*smoothstep(1.2,GRBAR*1.15,r);
+}
+/* x: arm brightness, y: dust lane (inner edge of each arm), z: HII line (just inside the arm ridge) */
+vec3 armField(float r,float th){
+  vec3 f=vec3(0.);
+  for(int i=0;i<4;i++){
+    float k=float(i);
+    bool mj=(i==0||i==2);
+    float gate=mj?smoothstep(2.4,5.2,r):smoothstep(4.,8.,r);
+    float sg=mj?(.20+.018*r):(.26+.020*r);
+    float d=wrapA(th-gArm(r,k));
+    f.x+=(mj?1.:.8)*gate*exp(-d*d/(2.*sg*sg));
+    float dd=d-(.15+.009*r),sd=.11+.007*r;
+    f.y+=gate*exp(-dd*dd/(2.*sd*sd));
+    float dh=d-(.05+.004*r),sh=.07+.004*r;
+    f.z+=gate*exp(-dh*dh/(2.*sh*sh));
+  }
+  return f;
+}
+vec3 diskEm(vec2 F){
+  float r0=length(F);
+  float e=u_g*u_g*(3.-2.*u_g);
+  vec2 Fb=rot2((1.-e)*(3.6+5.5/(1.+.35*r0)))*F;
+  float r=length(Fb);
+  float th=atan(Fb.y,Fb.x+1e-5);
+  vec3 af=armField(r,th);
+  float m=af.x;
+  float rev=1.-smoothstep(u_g*26.-5.,u_g*26.+1.,r);
+  float edge=rev/(1.+exp((r-15.1)/1.2));
+  float prof=(.58+.42*exp(-r/8.5))*edge;
+  float cl=fbm3(vec3(Fb*.5,2.3),4);
+  float fl=fbm3(vec3(Fb*1.7,8.1),3);
+  float fn=vnoise(vec3(Fb*5.5,4.4));
+  /* fine wound sub-arms: the flocculent, many-armed look of the inner disk */
+  float phi=th-5.3*log(max(r,1.));
+  float rip=.5+.5*cos(7.*phi+4.*fl);
+  float rg=smoothstep(2.5,5.5,r)*(1.-smoothstep(12.,17.,r));
+  rip=1.-rg*.55*(1.-rip);
+  float lum=prof*(.62+.62*m*(.55+.9*cl))*(.72+.56*fl)*(.85+.3*fn)*(.55+.45*rip);
+  vec3 st=mix(vec3(1.,.78,.58),vec3(.62,.72,1.),smoothstep(4.,13.,r));
+  st=mix(st,vec3(.68,.78,1.),clamp(m,0.,1.)*.35*smoothstep(5.,10.,r));
+  /* reddish-brown dust lanes */
+  float dn=fbm3(vec3(Fb*1.3,5.5),3);
+  float dn2=vnoise(vec3(Fb*4.,1.2));
+  float lane=clamp(af.y,0.,1.2)*(.15+1.*smoothstep(.38,.66,dn))*(.45+.8*dn2);
+  lane=max(lane,(1.-rip)*rg*.55*(.4+.9*smoothstep(.35,.7,dn)));
+  float tau=lane*smoothstep(.5,1.4,r)*1.35*(1.7-.9*smoothstep(6.,12.,r)-.4*smoothstep(12.,17.,r));
+  vec3 T=exp(-tau*vec3(.42,.90,1.25));
+  /* pink H-II star-forming knots clustered along the inner edge of the arms */
+  float cluster=smoothstep(.38,.7,fbm3(vec3(Fb*.7,9.9),3));
+  float kn=smoothstep(.52,.86,fbm3(vec3(Fb*2.4,3.3),3));
+  float kk=kn*clamp(af.z,0.,1.)*cluster*smoothstep(4.5,8.,r)*edge;
+  vec3 hii=mix(vec3(1.,.27,.50),vec3(1.,.80,.88),clamp(kk*1.3,0.,1.))*kk*1.8;
+  vec3 haze=vec3(.95,.34,.55)*clamp(af.z,0.,1.)*cluster*fl*.05*smoothstep(5.,9.,r)*edge;
+  return st*lum*.38*T+hii+haze;
+}
+/* line integral of an anisotropic gaussian blob (bar axis rotated by GBAR) along a ray: exact, so the bar and bulge are true 3D */
+float gline(vec3 po,vec3 pd,vec3 s,float ca,float sa){
+  vec3 o2=vec3(po.x*ca+po.y*sa,-po.x*sa+po.y*ca,po.z);
+  vec3 d2=vec3(pd.x*ca+pd.y*sa,-pd.x*sa+pd.y*ca,pd.z);
+  vec3 is=1./(s*s);
+  float a=dot(d2*d2,is),b=dot(o2*d2,is),c=dot(o2*o2,is);
+  return sqrt(6.2831853/a)*exp(-.5*(c-b*b/a));
+}
+float barLane(vec2 F){
+  float cb=cos(GBAR),sb=sin(GBAR);
+  float u=F.x*cb+F.y*sb,v=-F.x*sb+F.y*cb;
+  float vl=v+sign(u)*(.9+.1*abs(u));
+  return exp(-vl*vl/(2.*.22*.22))*(1.-smoothstep(1.6,3.6,abs(u)))*smoothstep(0.,.7,abs(u));
+}
+void main(){
+  vec2 uv=(2.*gl_FragCoord.xy-u_res)/u_res.y;
+  vec3 rd=normalize(u_right*uv.x*u_th+u_up*uv.y*u_th+u_fwd);
+  mat2 toF=rot2(u_rot);
+  vec3 og=vec3(toF*vec2(u_cam.x,-u_cam.z),u_cam.y);
+  vec3 dg=vec3(toF*vec2(rd.x,-rd.z),rd.y);
+  vec2 F0=vec2(1e3);
+  if(abs(dg.z)>1e-4){float t0=-og.z/dg.z;if(t0>0.)F0=og.xy+dg.xy*t0;}
+  bool hit0=F0.x<5e2;
+  /* thin disk: a few slices through the plane so it keeps some depth when orbited */
+  vec3 dsum=vec3(0.);float wsum=0.;
+  for(int i=0;i<5;i++){
+    if(i>=u_ns)break;
+    float yi=(float(i)-float(u_ns-1)*.5)*.55;
+    float w=exp(-abs(yi)/.5);
+    wsum+=w;
+    if(abs(dg.z)<1e-4)continue;
+    float t=(yi-og.z)/dg.z;
+    if(t<=0.)continue;
+    vec2 F=og.xy+dg.xy*t;
+    if(dot(F,F)>576.)continue;
+    dsum+=w*diskEm(F);
+  }
+  dsum/=max(wsum,1e-3);
+  /* central bar + boxy bulge, warm orange-cream */
+  float cb=cos(GBAR),sb=sin(GBAR);
+  vec3 core=vec3(1.,.86,.64)*.38*gline(og,dg,vec3(1.05,.92,.80),cb,sb)
+           +vec3(1.,.72,.42)*.85*gline(og,dg,vec3(2.1,.68,.55),cb,sb)
+           +vec3(.96,.66,.38)*.075*gline(og,dg,vec3(3.8,1.9,1.1),cb,sb)
+           +vec3(.95,.62,.36)*.022*gline(og,dg,vec3(3.4,3.0,1.8),cb,sb);
+  if(hit0){
+    float tb=.7*barLane(F0)*(.6+.8*fbm3(vec3(F0*1.3,3.3),3));
+    core*=exp(-tb*vec3(.45,.95,1.4));
+  }
+  core*=smoothstep(.05,.5,u_g);
+  /* faint navy sky and the soft blue halo around the disk */
+  vec3 amb=vec3(.0045,.0085,.0155);
+  if(hit0)amb+=vec3(.012,.016,.034)*exp(-dot(F0,F0)/288.);
+  /* small satellite dwarf galaxy to the upper left */
+  vec3 sat=vec3(0.);
+  if(hit0&&u_g>.6){
+    vec2 dv=F0-vec2(-6.38,15.58);
+    vec2 ds=rot2(.17)*dv;
+    float sgl=exp(-(ds.x*ds.x/(2.*.55*.55)+ds.y*ds.y/(2.*.28*.28)));
+    sat=(vec3(1.,.92,.72)*sgl*.85+vec3(.75,.82,1.)*exp(-dot(dv,dv)/(2.*1.1*1.1))*.08)*smoothstep(.6,.9,u_g);
+  }
+  o=vec4((dsum+core+amb+sat)*u_gx*u_bright,1.);
+}
+`;
 /* ============================ RENDERER ============================ */
 const MAXPT=Math.min(140,gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1]);
 const P={};
@@ -791,6 +927,7 @@ function buildPrograms(){
   P.web =program(WEB_VS,WEB_FS,'web');
   P.gal =program(GAL_VS,GAL_FS,'galaxies');
   P.mw  =program(MW_VS,MW_FS,'milkyway');
+  P.gx  =program(FS_TRI,GX_FS,'galaxyportrait');
   P.dust=program(DUST_VS,DUST_FS,'dust','#define MAXPT '+MAXPT.toFixed(1)+'\n');
   P.down=program(FS_TRI,DOWN_FS,'down');
   P.up  =program(FS_TRI,UP_FS,'up');
@@ -852,14 +989,23 @@ function drawGal(cam,o){
   u1f(p,'u_D',o.D);u1f(p,'u_box',o.box);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_gsize',o.gsize);u1f(p,'u_vis',o.vis);u1f(p,'u_bright',o.bright);
   gl.bindVertexArray(emptyVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,Q.gal);
 }
+function drawGX(cam,o){
+  const p=P.gx;gl.useProgram(p.p);additive();
+  u2f(p,'u_res',hdr.w,hdr.h);u1f(p,'u_time',o.time);
+  u3v(p,'u_cam',cam.eye);u3v(p,'u_right',cam.right);u3v(p,'u_up',cam.up);u3v(p,'u_fwd',cam.fwd);
+  u1f(p,'u_th',cam.th);u1f(p,'u_rot',o.rot);u1f(p,'u_g',o.g);u1f(p,'u_gx',o.gx);u1f(p,'u_bright',o.abright);
+  u1i(p,'u_ns',Q.aa?5:(Q.vol?3:1));
+  fsq();
+}
 function drawMW(cam,o){
+  drawGX(cam,o);
   gl.bindVertexArray(emptyVAO);
   let p=P.mw;gl.useProgram(p.p);additive();
   um4(p,'u_vp',cam.vp);u3v(p,'u_cam',cam.eye);
-  u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(6e5/Q.mw)*.15);u1f(p,'u_time',o.time);
+  u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(1-.68*(o.gx||0))*(6e5/Q.mw)*.15);u1f(p,'u_time',o.time);
   gl.drawArrays(gl.POINTS,0,Q.mw);
   p=P.dust;gl.useProgram(p.p);
-  um4(p,'u_vp',cam.vp);u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright);
+  um4(p,'u_vp',cam.vp);u1f(p,'u_g',o.g);u1f(p,'u_rot',o.rot);u1f(p,'u_pxs',cam.pxs);u1f(p,'u_bright',o.bright*(1-.55*(o.gx||0)));
   gl.enable(gl.BLEND);gl.blendFunc(gl.ZERO,gl.ONE_MINUS_SRC_ALPHA);
   u1i(p,'u_mode',0);gl.drawArrays(gl.POINTS,0,Q.dust);
   additive();
@@ -1252,8 +1398,8 @@ function renderScene(){
     const fin=ez((b-67)/4);
     const g=M.clamp((b-70)/38,0,1);
     const s=ez((b-70)/42);
-    let yaw=.10*(b-67)+orb.sy,pitch=M.clamp(lerp(1.0,1.26,s)+orb.sp,-1.45,1.45),dist=lerp(60,50,s)*Math.max(1,.8/(hdr.w/hdr.h))*orb.sz;
-    const f=ez((b-112)/20);
+    let yaw=-.5*(1-ez((b-67)/36))+orb.sy,pitch=M.clamp(lerp(1.0,1.45,s)+orb.sp,-1.45,1.45),dist=lerp(60,50,s)*Math.max(1,.8/(hdr.w/hdr.h))*orb.sz;
+    const f=ez((b-118)/14);
     dist=dist*Math.pow(1.8/dist,f);pitch=lerp(pitch,.12,f);
     const bhk=sst(130,137,b);
     if(bhk>0){
@@ -1261,8 +1407,8 @@ function renderScene(){
         {time,m:ez((b-131)/9)*.98+.02*ez((b-131)/9),gal:1-sst(134,142,b),expo:bhk,disk:sst(138,144,b)});
     }
     const cam=makeCam(bhEye(yaw,pitch,dist),[0,0,0],50,.03,300);
-    drawMW(cam,{g,rot:.042*(b-70),bright:fin*(1-bhk)*1.18,time});
-    o.expo=1.0;o.bloom=lerp(.26,.1,bhk);
+    drawMW(cam,{g,rot:.38+1.9*(1-g)*(1-g),gx:sst(.22,.85,g),abright:fin*(1-bhk),bright:fin*(1-bhk)*1.18,time});
+    o.expo=1.0;o.bloom=lerp(.18,.1,bhk);
   }
   return o;
 }
