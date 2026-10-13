@@ -1018,7 +1018,7 @@ function renderScene(){
   beginScene();
   const o={expo:1,black:false,flash:0,bloom:.38};
   if(mode==='home'||mode==='final'){
-    drawBH(makeCam(bhEye(orb.yaw,orb.pitch,orb.dist),[0,0,0],BH_FOV),{time,m:1,gal:mode==='final'?1:0,expo:1,disk:1});
+    drawBH(makeCam(bhEye(orb.yaw,orb.pitch,orb.dist),[0,0,0],BH_FOV),{time,m:1,gal:0,expo:1,disk:1});
     o.bloom=.1;return o;
   }
   const t=seqT;
@@ -1058,7 +1058,7 @@ function renderScene(){
     const bhk=sst(130,137,b);
     if(bhk>0){
       drawBH(makeCam(bhEye(orb.yaw,orb.pitch,orb.dist),[0,0,0],BH_FOV),
-        {time,m:ez((b-131)/9)*.98+.02*ez((b-131)/9),gal:1,expo:bhk,disk:sst(138,144,b)});
+        {time,m:ez((b-131)/9)*.98+.02*ez((b-131)/9),gal:1-sst(134,142,b),expo:bhk,disk:sst(138,144,b)});
     }
     const cam=makeCam(bhEye(yaw,pitch,dist),[0,0,0],50,.03,300);
     drawMW(cam,{g,rot:.05*(b-70),bright:fin*(1-bhk),time});
