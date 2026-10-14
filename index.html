@@ -1114,7 +1114,7 @@ function present(o){
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,hdr.tex);gl.uniform1i(p.U.u_hdr,0);
   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,hasB?bloomRT[0].tex:hdr.tex);gl.uniform1i(p.U.u_bloom,1);
   u1f(p,'u_bloomAmt',hasB?o.bloom:0);u1f(p,'u_expo',o.expo);u1f(p,'u_time',o.time);u1f(p,'u_black',o.black?1:0);
-  u1f(p,'u_ca',Q.bloom?.011:.006);u1f(p,'u_grain',.028);u1f(p,'u_flash',o.flash||0);u1f(p,'u_warp',Math.max(o.warp||0,.9*WORM*WORM));u2f(p,'u_res',cw,ch);
+  u1f(p,'u_ca',Q.bloom?.011:.006);u1f(p,'u_grain',.028);u1f(p,'u_flash',o.flash||0);u1f(p,'u_warp',0);u2f(p,'u_res',cw,ch);
   fsq();
   gl.activeTexture(gl.TEXTURE0);
 }
